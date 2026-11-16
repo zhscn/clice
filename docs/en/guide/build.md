@@ -33,6 +33,19 @@ The LLVM/Clang libraries hold ThinLTO bitcode, so every link of a program redoes
 
 `bazel build //:package //:symbols` builds the release archive and the symbol package, whose `clice.gsym` `scripts/symbolize.py` reads: `clice.tar.gz` and `clice-symbol.tar.xz` in `build/<type>/bin` (`.zip` on Windows).
 
+## Installing
+
+clice locates its builtin Clang headers relative to its executable. Install the executable and its resource files together so that headers such as `stddef.h` remain available:
+
+```shell
+bazel build //:bin/clice.stripped
+python3 scripts/install.py --prefix ~/.local
+```
+
+The installer uses `build/RelWithDebInfo/bin` by default, preferring `bin/clice.stripped` when present and otherwise using `bin/clice`. It installs the executable in `<prefix>/bin` and the resource files in `<prefix>/lib/clang`. Copies follow Bazel's symlinks, so the installed files remain usable after the build cache is removed. Add `<prefix>/bin` to `PATH`, then restart any running clice servers.
+
+For a system installation, run `sudo python3 scripts/install.py --prefix /usr/local`. To install a Debug build or an unpacked release, pass the directory containing both `bin/clice` and `lib/clang` as `--source`, for example `--source build/Debug/bin` or `--source /path/to/unpacked/clice`. The source must contain complete resource files; the installer checks these before changing the installation and replaces the executable after copying the resources. Existing Clang runtime files and other resource versions are preserved.
+
 ## Working on clice
 
 `bazel run @compdb//:refresh -- --output_groups=+compilation_prerequisites_INTERNAL_` writes a `compile_commands.json` of clice's own sources to the repository root, for clice to work on its own code; the output group builds the generated headers the commands read.

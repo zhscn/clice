@@ -33,6 +33,19 @@ LLVM/Clang 库中存放的是 ThinLTO bitcode，每次链接程序都会重新�
 
 `bazel build //:package //:symbols` 会构建发布归档包与符号包（其中包含供 `scripts/symbolize.py` 读取的 `clice.gsym`），产物为 `build/<type>/bin` 下的 `clice.tar.gz` 和 `clice-symbol.tar.xz`（Windows 上为 `.zip`）。
 
+## 安装
+
+clice 根据可执行文件的位置查找配套的 Clang 内置头文件。安装时需要把程序和资源文件一起复制，才能找到 `stddef.h` 等头文件：
+
+```shell
+bazel build //:bin/clice.stripped
+python3 scripts/install.py --prefix ~/.local
+```
+
+安装脚本默认从 `build/RelWithDebInfo/bin` 读取构建产物，优先使用 `bin/clice.stripped`，不存在时使用 `bin/clice`。程序安装到 `<prefix>/bin`，资源文件安装到 `<prefix>/lib/clang`。复制时会解引用 Bazel 的符号链接，因此清理构建缓存后，安装的文件仍可使用。将 `<prefix>/bin` 加入 `PATH`，然后重启正在运行的 clice 服务器。
+
+安装到系统目录可运行 `sudo python3 scripts/install.py --prefix /usr/local`。安装 Debug 构建或已解压的发布包时，通过 `--source` 指定同时包含 `bin/clice` 和 `lib/clang` 的目录，例如 `--source build/Debug/bin` 或 `--source /path/to/unpacked/clice`。源目录必须包含完整的资源文件；脚本会先检查并复制资源，再替换可执行文件。目标目录中已有的 Clang 运行时文件和其他版本的资源会保留。
+
 ## 开发 clice
 
 `bazel run @compdb//:refresh -- --output_groups=+compilation_prerequisites_INTERNAL_` 会在仓库根目录生成 clice 自身源码的 `compile_commands.json`，以便用 clice 开发其自身代码；该输出组还会构建各编译命令读取的生成头文件。
