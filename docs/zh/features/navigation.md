@@ -1220,6 +1220,21 @@ tests/navigation/projects/09_instantiated_templates
 
 调用层次结构列出调用某个函数的调用方以及该函数调用的其他函数；通过该函数重写的方法发起的调用也会计入其调用方。每个条目都会显示函数的形参以区分重载。函数的局部变量与形参不生成条目：唯一能使用它们的就是该函数自身。
 
+### `$clice/caller` / `$clice/callee` 扩展
+
+`$clice/caller` 查询调用方，`$clice/callee` 查询被调用方；两个接口都会加入当前函数的 base、derived 方法中的相应调用，方便沿重写关系追踪调用链。展开每个节点时都会再次查找它的 base 和 derived 方法，包括显式限定的调用。因此，这棵树用于探索可能的联系，不代表精确的运行时分派关系。
+
+首次请求传入 `textDocument` 和 `position`；继续展开时，传回节点的十进制字符串 `id` 即可，无需文档与位置。可选参数如下：
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `callType` | `3` | 始终包含直接调用；位 1 加入 base 方法的调用，位 2 加入 derived 方法的调用。 |
+| `qualified` | `true` | 显示函数的限定名称。 |
+| `levels` | `1` | 返回的子节点层数；`0` 只统计子节点。 |
+| `hierarchy` | `false` | 设为 `true` 返回树，否则返回所有后代节点的位置列表，排序并去重。 |
+
+树节点包含 `id`、`name`、`location`、`callType`、`numChildren` 和 `children`。节点的 `callType` 为 `0` 时表示直接调用，为 `1` 时表示从 base 方法收集的调用，为 `2` 时表示从 derived 方法收集的调用。callee 的位置指向调用处，caller 的位置指向所在函数的名称。同一位置只保留一个节点，优先保留直接调用。`numChildren` 统计按位置去重前的调用关系数，到达深度边界时也会统计。找不到对应函数时，树模式返回 `null`，位置列表模式返回 `[]`。
+
 <!-- BEGIN GENERATED ITEMS: navigation/call_hierarchy -->
 
 <!-- BEGIN CAPABILITY: supported -->

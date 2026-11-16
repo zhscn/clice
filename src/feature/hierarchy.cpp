@@ -11,6 +11,8 @@ namespace clice::feature {
 
 namespace {
 
+std::string known_name(const index::IndexQuery& query, index::SymbolHash symbol, Fid anchor);
+
 /// A function some source defines: its definition's extent and its name.
 struct DefinedFunction {
     index::SymbolHash hash;
@@ -274,6 +276,113 @@ CallGraph call_graph(const index::IndexQuery& index,
         graph.callees = located_callees(index, by_callee);
     }
     return graph;
+}
+
+std::optional<CallTreeNode> call_tree(const index::IndexQuery& query,
+                                      index::SymbolHash root,
+                                      Fid anchor,
+                                      CallTreeOptions options,
+                                      PositionEncoding encoding) {
+    auto located = query.resolve(root, anchor);
+    if(!located) {
+        for(auto& other: query.others()) {
+            if(auto found = other.resolve(root, anchor)) {
+                located = std::move(found);
+                break;
+            }
+        }
+    }
+    if(!located || !index::is_function(located->symbol.kind)) {
+        return std::nullopt;
+    }
+    CallTreeNode result;
+    result.id = std::format("{}", root);
+    result.name =
+        options.qualified ? known_name(query, root, anchor) : located->symbol.display_name();
+    result.location = to_location(located->site, encoding);
+
+    struct Neighbour {
+        index::SymbolHash symbol;
+        index::Site site;
+        int call_type;
+    };
+    std::vector<Neighbour> neighbours;
+    auto asked = query.asked(root, anchor);
+    for(auto& [from, named]: asked) {
+        llvm::SmallDenseSet<index::SymbolHash, 8> seen{named};
+        auto collect = [&](index::SymbolHash symbol, Fid file, int type) {
+            if(!options.callee) {
+                // Uses inside functions count as callers, including taking a
+                // function's address, so follow references here.
+                for(auto& edge: referencing_functions(*from, symbol, file)) {
+                    for(const auto& site: edge.sites) {
+                        if(query.answers_for(*from, site.file, asked)) {
+                            neighbours.push_back({edge.symbol.symbol.hash, edge.symbol.site, type});
+                        }
+                    }
+                }
+                return;
+            }
+            llvm::DenseMap<index::SymbolHash, std::vector<index::Site>> targets;
+            collect_by_target(*from, symbol, file, RelationKind::Callee, targets);
+            for(auto& [target, sites]: targets) {
+                index::dedup_sites(sites);
+                for(auto& site: sites) {
+                    if(query.answers_for(*from, site.file, asked)) {
+                        neighbours.push_back({target, std::move(site), type});
+                    }
+                }
+            }
+        };
+        collect(named, anchor, 0);
+        for(auto [mask, relation]: {
+                std::pair{1, RelationKind::Interface     },
+                std::pair{2, RelationKind::Implementation}
+        }) {
+            if(options.call_type & mask) {
+                for(auto target: from->transitive_targets(named, anchor, relation)) {
+                    if(seen.insert(target.symbol).second) {
+                        collect(target.symbol, target.anchor, mask);
+                    }
+                }
+            }
+        }
+    }
+    // Location identifies a node. Prefer direct calls when the same
+    // caller reaches several methods in the family.
+    ranges::stable_sort(neighbours, {}, &Neighbour::call_type);
+    result.num_children = static_cast<int>(neighbours.size());
+    std::set<std::tuple<std::string, std::uint32_t, std::uint32_t>> seen_sites;
+    for(auto& neighbour: neighbours) {
+        if(!seen_sites
+                .emplace(neighbour.site.path, neighbour.site.range.begin, neighbour.site.range.end)
+                .second) {
+            continue;
+        }
+        auto nested = options;
+        nested.levels = std::max(0, options.levels - 1);
+        if(options.levels > 0) {
+            if(auto child =
+                   call_tree(query, neighbour.symbol, neighbour.site.file, nested, encoding)) {
+                child->location = to_location(neighbour.site, encoding);
+                child->call_type = neighbour.call_type;
+                result.children.push_back(std::move(*child));
+            }
+        }
+    }
+    ranges::sort(result.children, [](const CallTreeNode& lhs, const CallTreeNode& rhs) {
+        return std::tie(lhs.location.uri,
+                        lhs.location.range.start.line,
+                        lhs.location.range.start.character,
+                        lhs.location.range.end.line,
+                        lhs.location.range.end.character) <
+               std::tie(rhs.location.uri,
+                        rhs.location.range.start.line,
+                        rhs.location.range.start.character,
+                        rhs.location.range.end.line,
+                        rhs.location.range.end.character);
+    });
+    return result;
 }
 
 TypeHierarchy type_hierarchy(const index::IndexQuery& index,

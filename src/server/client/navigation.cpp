@@ -6,6 +6,7 @@ import :feature.navigation;
 import :feature.protocol;
 import :feature.workspace_symbols;
 import :server.client;
+import :server.extension;
 import :server.master;
 import :server.served_project;
 import :support.json;
@@ -239,6 +240,119 @@ void LSPClient::register_navigation() {
                 });
         },
         {.closed = true});
+
+    for(auto [method, callee]: {
+            std::pair{"$clice/caller", false},
+            std::pair{"$clice/callee", true }
+    }) {
+        on_request<ext::CallTreeParams>(
+            method,
+            [this, callee](RequestContext& ctx, const ext::CallTreeParams& params) -> RawResult {
+                server.pool.user_activity();
+                auto empty = [&] {
+                    return codec::raw_value{params.hierarchy ? "null" : "[]"};
+                };
+                if(params.call_type < 0 || params.call_type > 3 || params.levels < 0) {
+                    co_await async::fail(ipc::Error{protocol::ErrorCode::InvalidParams,
+                                                    "Invalid callType or levels"});
+                }
+                feature::CallTreeOptions options{
+                    .callee = callee,
+                    .call_type = params.call_type,
+                    .qualified = params.qualified,
+                    .levels = params.levels,
+                };
+                auto reply = [&](const index::IndexQuery& query,
+                                 index::SymbolHash symbol,
+                                 Fid anchor) -> codec::raw_value {
+                    auto tree = feature::call_tree(query,
+                                                   symbol,
+                                                   anchor,
+                                                   options,
+                                                   server.position_encoding);
+                    if(params.hierarchy) {
+                        return to_raw(tree);
+                    }
+                    std::vector<protocol::Location> locations;
+                    if(tree) {
+                        std::vector<const feature::CallTreeNode*> pending;
+                        for(auto& child: tree->children) {
+                            pending.push_back(&child);
+                        }
+                        while(!pending.empty()) {
+                            auto* node = pending.back();
+                            pending.pop_back();
+                            locations.push_back(node->location);
+                            for(auto& child: node->children) {
+                                pending.push_back(&child);
+                            }
+                        }
+                    }
+                    auto key = [](const protocol::Location& location) {
+                        return std::tuple{location.uri,
+                                          location.range.start.line,
+                                          location.range.start.character,
+                                          location.range.end.line,
+                                          location.range.end.character};
+                    };
+                    ranges::sort(locations, {}, key);
+                    locations.erase(ranges::unique(locations, {}, key).begin(), locations.end());
+                    return to_raw(locations);
+                };
+                if(!params.id.empty()) {
+                    index::SymbolHash symbol = 0;
+                    auto [end, error] = std::from_chars(params.id.data(),
+                                                        params.id.data() + params.id.size(),
+                                                        symbol);
+                    if(error != std::errc{} || end != params.id.data() + params.id.size()) {
+                        co_await async::fail(
+                            ipc::Error{protocol::ErrorCode::InvalidParams, "Invalid call id"});
+                    }
+                    if(symbol >= std::numeric_limits<index::SymbolHash>::max() - 1) {
+                        co_return empty();
+                    }
+                    // An id identifies the symbol alone. Find its serving project
+                    // even when the client supplies no document on expansion.
+                    auto projects = server.projects;
+                    for(auto& project: projects) {
+                        if(project->broken()) {
+                            continue;
+                        }
+                        co_await project->compile_outdated();
+                        auto query = project->query_all();
+                        if(query.resolve(symbol, Fid{})) {
+                            co_return reply(query, symbol, Fid{});
+                        }
+                    }
+                    co_return empty();
+                }
+                if(!params.text_document || !params.position) {
+                    co_await async::fail(ipc::Error{protocol::ErrorCode::InvalidParams,
+                                                    "Expected textDocument and position or id"});
+                }
+                auto document = resolve_uri(params.text_document->uri);
+                auto& project = *document.project;
+                if(project.broken()) {
+                    co_return empty();
+                }
+                co_await project.compile_outdated();
+                co_return co_await navigate(
+                    project,
+                    document.ticket,
+                    document.path_id,
+                    *params.position,
+                    params.hierarchy ? "null" : "[]",
+                    [&](const Cursor& cursor) -> NavigationReply {
+                        auto query = project.query_all();
+                        for(auto& located: query.resolve_at(cursor)) {
+                            if(index::is_function(located.symbol.kind)) {
+                                return reply(query, located.symbol.hash, document.path_id);
+                            }
+                        }
+                        return empty();
+                    });
+            });
+    }
 
     on_document<protocol::CallHierarchyPrepareParams>(
         [this](RequestContext& ctx, const auto& params, ResolvedDoc document) -> RawResult {

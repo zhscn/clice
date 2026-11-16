@@ -56,6 +56,34 @@ CallGraph call_graph(const index::IndexQuery& index,
                      Fid anchor,
                      CallGraphOptions options);
 
+/// `$clice/caller` and `$clice/callee` explore calls written in a method and its override family.
+/// The numeric call type identifies calls collected from the root (0), its
+/// bases (1), or its derived methods (2); the mask defaults to both families.
+struct CallTreeOptions {
+    bool callee = false;
+    int call_type = 3;
+    bool qualified = true;
+    int levels = 1;
+};
+
+struct CallTreeNode {
+    std::string id;
+    std::string name;
+    protocol::Location location;
+    int call_type = 0;
+    int num_children = 0;
+    std::vector<CallTreeNode> children;
+};
+
+/// Expand by symbol id; the root uses its canonical site, children use the call
+/// site for callees and the enclosing function's name for callers. Each level
+/// repeats the family search, so this is an exploration tree of possible calls.
+std::optional<CallTreeNode> call_tree(const index::IndexQuery& query,
+                                      index::SymbolHash root,
+                                      Fid anchor,
+                                      CallTreeOptions options,
+                                      PositionEncoding encoding);
+
 /// The types `root` derives from and the ones deriving from it, each
 /// at its canonical site; only the sides asked for are walked.
 struct TypeHierarchyOptions {

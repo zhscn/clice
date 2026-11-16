@@ -4,6 +4,19 @@ import :support.prelude;
 
 namespace clice::ext {
 
+/// `$clice/caller` and `$clice/callee`: start at a document position or expand a returned symbol
+/// id.
+KANNOTATE_TYPE(struct CallTreeParams, presence_all = optional);
+struct CallTreeParams {
+    std::optional<protocol::TextDocumentIdentifier> text_document;
+    std::optional<protocol::Position> position;
+    std::string id;
+    int call_type = 3;
+    bool qualified = true;
+    int levels = 1;
+    bool hierarchy = false;
+};
+
 struct ContextItem {
     std::string label;
     std::string description;

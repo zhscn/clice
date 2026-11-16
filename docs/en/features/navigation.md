@@ -1326,6 +1326,21 @@ tests/navigation/projects/09_instantiated_templates
 
 A call hierarchy lists the callers of a function and the functions it calls; a call made through a method a function overrides counts among its callers. Each item shows the function's parameters, which tell overloads apart. A function's local variables and parameters get no item: their only caller is the function itself.
 
+### `$clice/caller` and `$clice/callee` extensions
+
+`$clice/caller` lists callers and `$clice/callee` lists callees, including calls collected from the function's base and derived methods. Every expanded node searches its override family again, including explicitly qualified calls, so the chain can continue through related methods. The tree describes possible connections for navigation rather than exact runtime dispatch.
+
+Start with `textDocument` and `position`, or pass a returned node's decimal string `id` to expand it. An `id` request needs no document or position. The optional parameters are:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `callType` | `3` | Always include direct calls; bit 1 adds calls from base methods, bit 2 adds calls from derived methods. |
+| `qualified` | `true` | Show qualified function names. |
+| `levels` | `1` | Number of child levels to return; `0` counts children only. |
+| `hierarchy` | `false` | Return a tree when `true`, otherwise a sorted list of distinct descendant locations. |
+
+A tree node contains `id`, `name`, `location`, `callType`, `numChildren`, and `children`. Its `callType` is `0` for direct calls, `1` for calls collected from base methods, or `2` for calls collected from derived methods. Callees point at call sites; callers point at the enclosing function's name. Nodes at the same location appear once, preferring direct calls. `numChildren` counts call relations before location deduplication, including at the depth boundary. No matching function returns `null` in tree mode and `[]` in location mode.
+
 <!-- BEGIN GENERATED ITEMS: navigation/call_hierarchy -->
 
 <!-- BEGIN CAPABILITY: supported -->
